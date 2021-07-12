@@ -1,7 +1,23 @@
 import cv2
+import math
 import mediapipe as mp
 import autopy
 import numpy as np
+
+
+############################################################
+
+from ctypes import cast, POINTER
+from comtypes import CLSCTX_ALL
+from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+devices = AudioUtilities.GetSpeakers()
+interface = devices.Activate(
+    IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+volume = cast(interface, POINTER(IAudioEndpointVolume))
+
+# print(volume.GetMasterVolumeLevel(), volume.GetVolumeRange())
+
+#############################################################
 
 # size of screen
 wScr, hScr = autopy.screen.size()
@@ -34,7 +50,8 @@ fingerList = [
     [mphands.HandLandmark.INDEX_FINGER_TIP, mphands.HandLandmark.INDEX_FINGER_PIP],
     [mphands.HandLandmark.MIDDLE_FINGER_TIP, mphands.HandLandmark.MIDDLE_FINGER_PIP],
     [mphands.HandLandmark.RING_FINGER_TIP, mphands.HandLandmark.RING_FINGER_PIP],
-    [mphands.HandLandmark.PINKY_TIP, mphands.HandLandmark.RING_FINGER_PIP]
+    [mphands.HandLandmark.PINKY_TIP, mphands.HandLandmark.PINKY_PIP],
+    [mphands.HandLandmark.INDEX_FINGER_PIP, mphands.HandLandmark.THUMB_TIP]
 ]
 
 # to draw traced hand
@@ -46,8 +63,8 @@ while True:
 
     result = hands.process(imgRGB)
 
-    # index, middle, ring, pinky-up  0-down
-    fingers = [0, 0, 0, 0]
+    # index, middle, ring, pinky, thumb    1-up  0-down
+    fingers = [0, 0, 0, 0, 0]
 
     if result.multi_hand_landmarks:
         for handLms in result.multi_hand_landmarks:
@@ -58,11 +75,14 @@ while True:
                 if handLms.landmark[fingerList[i][0]].y < handLms.landmark[fingerList[i][1]].y:
                     fingers[i] = 1
 
+            if handLms.landmark[fingerList[4][0]].x < handLms.landmark[fingerList[4][1]].x:
+                fingers[4] = 1
+
     # creating rectangle in which mouse works
     cv2.rectangle(img, (frameR, frameR), (frameWidth - frameR, frameHeight - frameR), (255, 0, 255), 1)
 
     # moving mouse when only index up
-    if fingers[0] == 1 and fingers[1] == 0:
+    if fingers[0] == 1 and fingers[1] == 0 and fingers[4] == 0:
         # x and y coordinates of index finger
         index_tip_x = int(handLms.landmark[fingerList[0][0]].x * frameWidth)
         index_tip_y = int(handLms.landmark[fingerList[0][0]].y * frameHeight)
@@ -86,7 +106,7 @@ while True:
             autopy.mouse.move(newx, smooth_y)
 
     # both index and middle up for clicking
-    if fingers[0] == 1 and fingers[1] == 1:
+    if fingers[0] == 1 and fingers[1] == 1 and fingers[4] == 0:
         index_tip_x = int(handLms.landmark[fingerList[0][0]].x * frameWidth)
         index_tip_y = int(handLms.landmark[fingerList[0][0]].y * frameHeight)
 
@@ -96,6 +116,32 @@ while True:
         # if distance between index and tip is less than 30 then click
         if index_tip_x - middle_tip_x < 30 and middle_tip_y < index_tip_y:
             autopy.mouse.click()
+
+    # index and thumb up
+    if fingers[0] == 1 and fingers[4] == 1 and fingers[1] == 0 and fingers[2] == 0 and fingers[3] == 0:
+
+        index_tip_x = int(handLms.landmark[fingerList[0][0]].x * frameWidth)
+        index_tip_y = int(handLms.landmark[fingerList[0][0]].y * frameHeight)
+
+        thumb_tip_x = int(handLms.landmark[mphands.HandLandmark.THUMB_TIP].x * frameWidth)
+        thumb_tip_y = int(handLms.landmark[mphands.HandLandmark.THUMB_TIP].y * frameHeight)
+
+        center_x = int((index_tip_x + thumb_tip_x) / 2)
+        center_y = int((index_tip_y + thumb_tip_y) / 2)
+
+        cv2.line(img, (index_tip_x, index_tip_y), (thumb_tip_x, thumb_tip_y), (255, 255, 0), thickness=4)
+
+        cv2.circle(img, (center_x, center_y), 10, (255, 0, 255), cv2.FILLED)
+
+        # ditance between thumb and index
+        dist = math.sqrt((index_tip_x - thumb_tip_x) ** 2 + (index_tip_y - thumb_tip_y) ** 2)
+
+        # from get vol range we know that -65.25 is vol 0% and 0 is 100% vol
+        # interp changes the range from 20,200 (we know from printing distance) to -65,0
+        vol = np.interp(dist, [20, 200], [-65.25, 0])
+
+        volume.SetMasterVolumeLevel(vol, None)
+
 
     # showing webcam q to exit
     cv2.imshow("title", img)
